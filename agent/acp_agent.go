@@ -551,6 +551,13 @@ func (a *ACPAgent) handlePermissionRequest(raw string) {
 	log.Printf("[acp] auto-allowed permission request")
 }
 
+// SessionID returns the agent-side session ID for the given conversationID.
+func (a *ACPAgent) SessionID(conversationID string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sessions[conversationID]
+}
+
 // Info returns metadata about this agent.
 func (a *ACPAgent) Info() AgentInfo {
 	info := AgentInfo{

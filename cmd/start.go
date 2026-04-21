@@ -97,6 +97,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 		log.Printf("Available agents: %v (default: %s)", names, cfg.DefaultAgent)
 	}
 
+	// Initialize session manager
+	weclawHome := weclawDir()
+	sessions := messaging.NewSessionManager(weclawHome)
+	if err := sessions.Load(); err != nil {
+		log.Printf("Warning: failed to load sessions: %v", err)
+	}
+	go sessions.StartCleanup(ctx)
+
 	// Create handler with an agent factory for on-demand agent creation
 	handler := messaging.NewHandler(
 		func(ctx context.Context, name string) agent.Agent {
@@ -106,6 +114,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 			cfg.DefaultAgent = name
 			return config.Save(cfg)
 		},
+		sessions,
 	)
 
 	// Populate agent metas for /status

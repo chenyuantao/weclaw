@@ -58,6 +58,13 @@ type streamEvent struct {
 	IsError   bool   `json:"is_error"`
 }
 
+// SessionID returns the agent-side session ID for the given conversationID.
+func (a *CLIAgent) SessionID(conversationID string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sessions[conversationID]
+}
+
 // Info returns metadata about this agent.
 func (a *CLIAgent) Info() AgentInfo {
 	return AgentInfo{

@@ -57,6 +57,11 @@ func NewHTTPAgent(cfg HTTPAgentConfig) *HTTPAgent {
 	}
 }
 
+// SessionID returns empty string — HTTP agents have no server-side session ID.
+func (a *HTTPAgent) SessionID(_ string) string {
+	return ""
+}
+
 // Info returns metadata about this agent.
 func (a *HTTPAgent) Info() AgentInfo {
 	return AgentInfo{
