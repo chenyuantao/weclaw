@@ -65,6 +65,17 @@ func (a *CLIAgent) SessionID(conversationID string) string {
 	return a.sessions[conversationID]
 }
 
+// RestoreSession re-associates a persisted session ID so the next Chat
+// call will use --resume to continue the conversation.
+func (a *CLIAgent) RestoreSession(conversationID, agentSessionID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, exists := a.sessions[conversationID]; !exists {
+		a.sessions[conversationID] = agentSessionID
+		log.Printf("[cli] restored session (command=%s, session=%s, conversation=%s)", a.command, agentSessionID, conversationID)
+	}
+}
+
 // Info returns metadata about this agent.
 func (a *CLIAgent) Info() AgentInfo {
 	return AgentInfo{

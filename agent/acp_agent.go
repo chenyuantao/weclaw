@@ -552,6 +552,10 @@ func (a *ACPAgent) handlePermissionRequest(raw string) {
 	log.Printf("[acp] auto-allowed permission request")
 }
 
+// RestoreSession is a no-op for ACP agents — sessions are tied to the
+// subprocess lifetime and cannot survive a restart.
+func (a *ACPAgent) RestoreSession(_, _ string) {}
+
 // SessionID returns the agent-side session ID for the given conversationID.
 func (a *ACPAgent) SessionID(conversationID string) string {
 	a.mu.Lock()

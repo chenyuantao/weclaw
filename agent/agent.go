@@ -61,6 +61,11 @@ type Agent interface {
 	// (CLI mode) or is not applicable (HTTP mode).
 	ResetSession(ctx context.Context, conversationID string) (string, error)
 
+	// RestoreSession re-associates a previously persisted agent session ID with
+	// a conversationID. Called after restart so agents can resume sessions that
+	// were saved to disk. No-op for agents that don't support session resumption.
+	RestoreSession(conversationID, agentSessionID string)
+
 	// SessionID returns the agent-side session ID for the given conversationID.
 	// Returns empty string if not applicable (e.g. HTTP agents).
 	SessionID(conversationID string) string

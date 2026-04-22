@@ -57,6 +57,9 @@ func NewHTTPAgent(cfg HTTPAgentConfig) *HTTPAgent {
 	}
 }
 
+// RestoreSession is a no-op for HTTP agents — no server-side sessions.
+func (a *HTTPAgent) RestoreSession(_, _ string) {}
+
 // SessionID returns empty string — HTTP agents have no server-side session ID.
 func (a *HTTPAgent) SessionID(_ string) string {
 	return ""
