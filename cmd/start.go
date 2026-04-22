@@ -114,19 +114,23 @@ func runStart(cmd *cobra.Command, args []string) error {
 			}
 			return createAgentByName(ctx, freshCfg, name)
 		},
-		func() map[string]string {
+		func() map[string]messaging.CommandInfo {
 			freshCfg, err := config.Load()
 			if err != nil {
 				log.Printf("[handler] failed to reload config for commands: %v", err)
 				freshCfg = cfg
 			}
-			cmds := make(map[string]string, len(freshCfg.Agents))
+			cmds := make(map[string]messaging.CommandInfo, len(freshCfg.Agents))
 			for key, agCfg := range freshCfg.Agents {
 				agentType := agCfg.Agent
 				if agentType == "" {
 					agentType = agCfg.Type
 				}
-				cmds[key] = agentType
+				cmds[key] = messaging.CommandInfo{
+					Type:  agentType,
+					Model: agCfg.Model,
+					Cwd:   agCfg.Cwd,
+				}
 			}
 			return cmds
 		},

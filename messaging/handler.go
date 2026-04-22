@@ -454,11 +454,18 @@ func (h *Handler) buildStatus() string {
 		sort.Strings(keys)
 		sb.WriteString("\n\nagents:")
 		for _, key := range keys {
+			info := cmds[key]
 			marker := ""
 			if key == defaultKey {
 				marker = " *"
 			}
-			sb.WriteString(fmt.Sprintf("\n  /%s (%s)%s", key, cmds[key], marker))
+			sb.WriteString(fmt.Sprintf("\n  /%s (%s)%s", key, info.Type, marker))
+			if info.Model != "" {
+				sb.WriteString(fmt.Sprintf("\n    model: %s", info.Model))
+			}
+			if info.Cwd != "" {
+				sb.WriteString(fmt.Sprintf("\n    cwd: %s", info.Cwd))
+			}
 		}
 	} else {
 		sb.WriteString("\n\nNo agents configured.")
@@ -521,8 +528,15 @@ func (h *Handler) buildHelpText() string {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			agentType := cmds[key]
-			sb.WriteString(fmt.Sprintf("/%s [message] (%s)\n", key, agentType))
+			info := cmds[key]
+			detail := info.Type
+			if info.Model != "" {
+				detail += ", " + info.Model
+			}
+			if info.Cwd != "" {
+				detail += ", " + info.Cwd
+			}
+			sb.WriteString(fmt.Sprintf("/%s [message] (%s)\n", key, detail))
 		}
 	}
 
