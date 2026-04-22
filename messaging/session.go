@@ -34,55 +34,6 @@ func (s *Session) AgentLookupKey() string {
 	return s.AgentName
 }
 
-// nicknamePool is a set of short, memorable nicknames for sessions.
-var nicknamePool = []string{
-	"ace", "bolt", "comet", "dash", "echo",
-	"flux", "glide", "haze", "ivy", "jazz",
-	"kite", "lark", "mist", "nova", "opus",
-	"pulse", "quest", "reef", "spark", "tide",
-	"ultra", "vibe", "warp", "xray", "zen",
-}
-
-// nicknameEmoji maps the first letter of a nickname to an emoji.
-var nicknameEmoji = map[byte]string{
-	'a': "\U0001F34E", // 🍎
-	'b': "\U0001F34C", // 🍌
-	'c': "\U0001F338", // 🌸
-	'd': "\U0001F48E", // 💎
-	'e': "\U000026A1", // ⚡
-	'f': "\U0001F525", // 🔥
-	'g': "\U0001F48E", // 💎 (replaced: 🌿 doesn't render well → use 💚)
-	'h': "\U0001F33F", // 🌿
-	'i': "\U0001F9CA", // 🧊
-	'j': "\U0001F3B5", // 🎵
-	'k': "\U0001F3C0", // 🏀 (kite → not a common emoji, use 🪁 or 🏀)
-	'l': "\U0001F343", // 🍃
-	'm': "\U0001F319", // 🌙
-	'n': "\U00002B50", // ⭐
-	'o': "\U0001F3B6", // 🎶
-	'p': "\U0001F49C", // 💜
-	'q': "\U0001F451", // 👑
-	'r': "\U0001F308", // 🌈
-	's': "\U00002728", // ✨
-	't': "\U0001F30A", // 🌊
-	'u': "\U0001F984", // 🦄
-	'v': "\U0001F33A", // 🌺
-	'w': "\U0001F300", // 🌀
-	'x': "\U0001F52E", // 🔮
-	'z': "\U000026A1", // ⚡
-}
-
-// NicknameDisplay returns the emoji-prefixed nickname, e.g. "🍎ace".
-func NicknameDisplay(nickname string) string {
-	if len(nickname) == 0 {
-		return nickname
-	}
-	if emoji, ok := nicknameEmoji[nickname[0]]; ok {
-		return emoji + nickname
-	}
-	return nickname
-}
-
 // SessionManager manages per-user sessions with persistence and TTL-based cleanup.
 type SessionManager struct {
 	mu       sync.RWMutex
@@ -109,6 +60,9 @@ func (sm *SessionManager) Create(userID, agentName string) *Session {
 func (sm *SessionManager) CreateWithKey(userID, agentName, agentKey string) *Session {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	// Reload from disk to avoid nickname collisions after restart
+	sm.loadLocked()
 
 	nickname := agentName + "-" + sm.pickNickname(userID, agentName)
 	sess := &Session{
@@ -236,7 +190,11 @@ func (sm *SessionManager) StartCleanup(ctx context.Context) {
 func (sm *SessionManager) Load() error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	return sm.loadLocked()
+}
 
+// loadLocked reads sessions from disk. Must be called with sm.mu held.
+func (sm *SessionManager) loadLocked() error {
 	path := filepath.Join(sm.dataDir, "sessions.json")
 	data, err := os.ReadFile(path)
 	if err != nil {

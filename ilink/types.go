@@ -85,6 +85,18 @@ type MessageItem struct {
 	ImageItem *ImageItem `json:"image_item,omitempty"`
 	VideoItem *VideoItem `json:"video_item,omitempty"`
 	FileItem  *FileItem  `json:"file_item,omitempty"`
+	RefMsg    *RefMsg    `json:"ref_msg,omitempty"`
+}
+
+// RefMsg represents a quoted/replied-to message.
+type RefMsg struct {
+	MessageItem *RefMessageItem `json:"message_item,omitempty"`
+}
+
+// RefMessageItem is the content of a referenced message.
+type RefMessageItem struct {
+	Type     int       `json:"type"`
+	TextItem *TextItem `json:"text_item,omitempty"`
 }
 
 // CDN media type constants.

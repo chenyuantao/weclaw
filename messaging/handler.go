@@ -173,6 +173,38 @@ func (h *Handler) HandleMessage(ctx context.Context, client *ilink.Client, msg i
 	userID := msg.FromUserID
 	trimmed := strings.TrimSpace(text)
 
+	// --- Ref-msg session routing (highest priority) ---
+	// When user replies to a bot message with header like [🍎admin-ace],
+	// automatically route to that session.
+	if refNickname := extractRefNickname(msg); refNickname != "" {
+		// /clear on ref-msg → archive that session
+		if trimmed == "/clear" {
+			log.Printf("[handler] ref-msg /clear for session @%s", refNickname)
+			reply := h.handleClear(userID, "/clear @"+refNickname)
+			h.sendReply(ctx, client, userID, reply, msg.ContextToken, clientID)
+			return
+		}
+
+		sess := h.sessions.Get(userID, refNickname)
+		if sess != nil {
+			log.Printf("[handler] ref-msg routing to session @%s", refNickname)
+			h.handleSessionChat(ctx, client, userID, sess, trimmed, msg.ContextToken, clientID)
+			return
+		}
+
+		// Session not found — extract agent name from nickname and create a new session
+		if agentName := ExtractAgentName(refNickname); agentName != "" {
+			log.Printf("[handler] ref-msg session @%s expired, creating new %s session", refNickname, agentName)
+			if agentName == "admin" {
+				h.handleNewSessionAs(ctx, client, userID, "admin:"+h.defaultKey(), "admin", trimmed, msg.ContextToken, clientID)
+			} else {
+				h.handleNewSession(ctx, client, userID, agentName, trimmed, msg.ContextToken, clientID)
+			}
+			return
+		}
+		log.Printf("[handler] ref-msg nickname @%s not found, falling through", refNickname)
+	}
+
 	// --- Built-in commands ---
 
 	// /status
@@ -269,7 +301,7 @@ func (h *Handler) handleNewSessionAs(ctx context.Context, client *ilink.Client, 
 	sess := h.sessions.CreateWithKey(userID, displayName, agentKey)
 
 	if message == "" {
-		reply := fmt.Sprintf("New %s session created: @%s\nUse @%s <message> to chat.", displayName, sess.Nickname, sess.Nickname)
+		reply := fmt.Sprintf("[%s]\nNew session created.\nUse @%s <message> to chat.", NicknameDisplay(sess.Nickname), sess.Nickname)
 		h.sendReply(ctx, client, userID, reply, contextToken, clientID)
 		return
 	}
@@ -438,11 +470,16 @@ func (h *Handler) buildHelpText() string {
 	sb.WriteString("Commands:\n")
 	sb.WriteString("@nickname message - Chat with a session\n")
 	sb.WriteString("/new [message] - Create session on default agent\n")
+	sb.WriteString("/admin [message] - Edit config via agent\n")
+	sb.WriteString("/clear - Archive all sessions\n")
+	sb.WriteString("/clear @nickname - Archive a specific session\n")
+	sb.WriteString("/status - Show agent info\n")
+	sb.WriteString("/help - Show this help")
 
 	// Dynamic agent commands from config
 	cmds := h.commands()
 	if len(cmds) > 0 {
-		// Sort keys for stable output
+		sb.WriteString("\n----\nAgents:\n")
 		keys := make([]string, 0, len(cmds))
 		for k := range cmds {
 			keys = append(keys, k)
@@ -450,15 +487,10 @@ func (h *Handler) buildHelpText() string {
 		sort.Strings(keys)
 		for _, key := range keys {
 			agentType := cmds[key]
-			sb.WriteString(fmt.Sprintf("/%s [message] - Create session (%s)\n", key, agentType))
+			sb.WriteString(fmt.Sprintf("/%s [message] (%s)\n", key, agentType))
 		}
 	}
 
-	sb.WriteString("/admin [message] - Edit config via agent\n")
-	sb.WriteString("/clear - Archive all sessions\n")
-	sb.WriteString("/clear @nickname - Archive a specific session\n")
-	sb.WriteString("/status - Show agent info\n")
-	sb.WriteString("/help - Show this help")
 	return sb.String()
 }
 
@@ -470,3 +502,24 @@ func extractText(msg ilink.WeixinMessage) string {
 	}
 	return ""
 }
+
+// extractRefNickname extracts a session nickname from the ref_msg header.
+// It looks for a pattern like [🍎admin-ace] at the start of the referenced message text,
+// strips the leading emoji, and returns the nickname (e.g. "admin-ace").
+func extractRefNickname(msg ilink.WeixinMessage) string {
+	for _, item := range msg.ItemList {
+		if item.RefMsg == nil || item.RefMsg.MessageItem == nil {
+			continue
+		}
+		if item.RefMsg.MessageItem.Type != ilink.ItemTypeText || item.RefMsg.MessageItem.TextItem == nil {
+			continue
+		}
+		refText := item.RefMsg.MessageItem.TextItem.Text
+		nickname := ParseNicknameFromHeader(refText)
+		if nickname != "" {
+			return nickname
+		}
+	}
+	return ""
+}
+
