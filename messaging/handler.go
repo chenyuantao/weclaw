@@ -16,8 +16,15 @@ import (
 // AgentFactory creates an agent by config name. Returns nil if the name is unknown.
 type AgentFactory func(ctx context.Context, name string) agent.Agent
 
-// CommandsFunc returns the current command key → agent type mapping from config.
-type CommandsFunc func() map[string]string
+// CommandInfo holds display information for a configured agent command.
+type CommandInfo struct {
+	Type  string // e.g. "acp", "cli", "http"
+	Model string // e.g. "sonnet", "gpt-4o-mini"
+	Cwd   string // working directory
+}
+
+// CommandsFunc returns the current command key → agent info mapping from config.
+type CommandsFunc func() map[string]CommandInfo
 
 // DefaultKeyFunc returns the current default command key from config.
 type DefaultKeyFunc func() string
@@ -348,25 +355,41 @@ func (h *Handler) dispatchChat(ctx context.Context, client *ilink.Client, userID
 func (h *Handler) handleClear(userID, trimmed string) string {
 	arg := strings.TrimSpace(strings.TrimPrefix(trimmed, "/clear"))
 
+	var result string
+
 	// /clear @nickname — archive a specific session
 	if strings.HasPrefix(arg, "@") {
 		nickname := arg[1:]
 		if h.sessions.Archive(userID, nickname) {
-			return fmt.Sprintf("Session @%s archived.", nickname)
+			result = fmt.Sprintf("Session @%s archived.", nickname)
+		} else {
+			return fmt.Sprintf("Session @%s not found.", nickname)
 		}
-		return fmt.Sprintf("Session @%s not found.", nickname)
+	} else {
+		// /clear — archive all sessions
+		count := h.sessions.ArchiveAll(userID)
+		if count == 0 {
+			return "No active sessions."
+		}
+		result = fmt.Sprintf("Archived %d session(s).", count)
 	}
 
-	// /clear — archive all sessions
-	count := h.sessions.ArchiveAll(userID)
-	if count == 0 {
-		return "No active sessions."
+	// Append remaining active sessions
+	if extra := h.formatSessionList(userID); extra != "" {
+		result += "\n\n" + extra
 	}
-	return fmt.Sprintf("Archived %d session(s).", count)
+
+	return result
 }
 
 // chatWithSession sends a message to an agent using the session's ConvKey.
 func (h *Handler) chatWithSession(ctx context.Context, ag agent.Agent, sess *Session, message string) (string, error) {
+	// Restore agent-side session if persisted (e.g. after weclaw restart).
+	// RestoreSession is idempotent — agents skip if already known.
+	if sess.AgentSession != "" {
+		ag.RestoreSession(sess.ConvKey, sess.AgentSession)
+	}
+
 	info := ag.Info()
 	log.Printf("[handler] dispatching to agent (%s) for session @%s (convKey=%s)", info, sess.Nickname, sess.ConvKey)
 
@@ -454,14 +477,26 @@ func (h *Handler) buildSessionHelp(userID, prefix string) string {
 
 	sb.WriteString(h.buildHelpText())
 
-	sessions := h.sessions.List(userID)
-	if len(sessions) > 0 {
-		sb.WriteString("\n\nActive sessions:\n")
-		for _, s := range sessions {
-			sb.WriteString(fmt.Sprintf("  @%s (%s)\n", s.Nickname, s.AgentName))
-		}
+	if extra := h.formatSessionList(userID); extra != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(extra)
 	}
 
+	return sb.String()
+}
+
+// formatSessionList returns a formatted list of active sessions for the user,
+// sorted by last active time descending. Returns empty string if no sessions.
+func (h *Handler) formatSessionList(userID string) string {
+	sessions := h.sessions.List(userID)
+	if len(sessions) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Active sessions:")
+	for _, s := range sessions {
+		sb.WriteString(fmt.Sprintf("\n  @%s (%s) %s", s.Nickname, s.AgentName, s.LastActiveAt.Format("01/02 15:04")))
+	}
 	return sb.String()
 }
 
