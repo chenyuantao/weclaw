@@ -181,7 +181,7 @@ func (h *Handler) HandleMessage(ctx context.Context, client *ilink.Client, msg i
 	trimmed := strings.TrimSpace(text)
 
 	// --- Ref-msg session routing (highest priority) ---
-	// When user replies to a bot message with header like [🍎admin-ace],
+	// When user replies to a bot message with header like [🍎admin-0],
 	// automatically route to that session.
 	if refNickname := extractRefNickname(msg); refNickname != "" {
 		// /clear on ref-msg → archive that session
@@ -553,8 +553,8 @@ func extractText(msg ilink.WeixinMessage) string {
 }
 
 // extractRefNickname extracts a session nickname from the ref_msg header.
-// It looks for a pattern like [🍎admin-ace] at the start of the referenced message text,
-// strips the leading emoji, and returns the nickname (e.g. "admin-ace").
+// It looks for a pattern like [🍎admin-0] at the start of the referenced message text,
+// strips the leading emoji, and returns the nickname (e.g. "admin-0").
 func extractRefNickname(msg ilink.WeixinMessage) string {
 	for _, item := range msg.ItemList {
 		if item.RefMsg == nil || item.RefMsg.MessageItem == nil {

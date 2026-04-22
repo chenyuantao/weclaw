@@ -233,23 +233,15 @@ func (sm *SessionManager) saveLocked() {
 	}
 }
 
-// pickNickname selects an unused nickname for the given user and agent prefix. Must be called with sm.mu held.
+// pickNickname selects an unused numeric suffix for the given user and agent prefix. Must be called with sm.mu held.
 func (sm *SessionManager) pickNickname(userID, agentName string) string {
 	used := make(map[string]bool)
 	for _, s := range sm.sessions[userID] {
 		used[s.Nickname] = true
 	}
 
-	for _, name := range nicknamePool {
-		full := agentName + "-" + name
-		if !used[full] {
-			return name
-		}
-	}
-
-	// Fallback: s1, s2, ...
-	for i := 1; ; i++ {
-		name := fmt.Sprintf("s%d", i)
+	for i := 0; ; i++ {
+		name := fmt.Sprintf("%d", i)
 		full := agentName + "-" + name
 		if !used[full] {
 			return name

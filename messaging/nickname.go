@@ -2,15 +2,6 @@ package messaging
 
 import "strings"
 
-// nicknamePool is a set of short, memorable suffixes for session nicknames.
-var nicknamePool = []string{
-	"ace", "bolt", "comet", "dash", "echo",
-	"flux", "glide", "haze", "ivy", "jazz",
-	"kite", "lark", "mist", "nova", "opus",
-	"pulse", "quest", "reef", "spark", "tide",
-	"ultra", "vibe", "warp", "xray", "zen",
-}
-
 // nicknameEmoji maps the first letter of a nickname to an emoji.
 var nicknameEmoji = map[byte]string{
 	'a': "\U0001F34E", // 🍎
@@ -42,7 +33,7 @@ var nicknameEmoji = map[byte]string{
 
 // --- Formatting (nickname → display string) ---
 
-// NicknameDisplay returns the emoji-prefixed nickname, e.g. "🍎ace".
+// NicknameDisplay returns the emoji-prefixed nickname, e.g. "🍎admin-0".
 func NicknameDisplay(nickname string) string {
 	if len(nickname) == 0 {
 		return nickname
@@ -56,7 +47,7 @@ func NicknameDisplay(nickname string) string {
 // --- Parsing (display string → nickname) ---
 
 // ParseNicknameFromHeader parses a nickname from text starting with [emoji+nickname].
-// e.g. "[🍎admin-ace]\nSome content..." → "admin-ace"
+// e.g. "[🍎admin-0]\nSome content..." → "admin-0"
 // This is the inverse of the header format produced by NicknameDisplay.
 func ParseNicknameFromHeader(text string) string {
 	if !strings.HasPrefix(text, "[") {
@@ -66,7 +57,7 @@ func ParseNicknameFromHeader(text string) string {
 	if end < 0 {
 		return ""
 	}
-	inside := text[1:end] // e.g. "🍎admin-ace"
+	inside := text[1:end] // e.g. "🍎admin-0"
 
 	// Strip leading non-letter runes (the emoji prefix added by NicknameDisplay)
 	for i, r := range inside {
@@ -78,7 +69,7 @@ func ParseNicknameFromHeader(text string) string {
 }
 
 // ExtractAgentName returns the agent/display name from a session nickname.
-// Nickname format is "{agentName}-{poolSuffix}", e.g. "admin-ace" → "admin".
+// Nickname format is "{agentName}-{index}", e.g. "admin-0" → "admin".
 func ExtractAgentName(nickname string) string {
 	idx := strings.LastIndexByte(nickname, '-')
 	if idx <= 0 {
