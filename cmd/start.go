@@ -56,6 +56,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return runDaemon()
 	}
 
+	// Kill existing process to ensure only one instance
+	killExistingProcess()
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -200,6 +203,22 @@ func runStart(cmd *cobra.Command, args []string) error {
 			runMonitorWithRestart(ctx, c, handler)
 		}(creds)
 	}
+
+	// Send startup notification to account owners
+	go func() {
+		ver := BuildVersion()
+		msg := fmt.Sprintf("weclaw已启动，构建版本 %s", ver)
+		log.Printf("[start] %s", msg)
+		for _, creds := range accounts {
+			if creds.ILinkUserID == "" {
+				continue
+			}
+			client := ilink.NewClient(creds)
+			if err := messaging.SendTextReply(ctx, client, creds.ILinkUserID, msg, "", ""); err != nil {
+				log.Printf("[start] startup notification to %s failed: %v", creds.ILinkUserID, err)
+			}
+		}
+	}()
 
 	wg.Wait()
 	log.Println("All monitors stopped")
@@ -375,15 +394,31 @@ func logFile() string {
 	return filepath.Join(weclawDir(), "weclaw.log")
 }
 
+// killExistingProcess terminates any running weclaw process found via the PID file.
+func killExistingProcess() {
+	pid, err := readPid()
+	if err != nil {
+		return
+	}
+	// Skip if PID is ourselves (daemon parent wrote our PID before we started)
+	if pid == os.Getpid() {
+		return
+	}
+	if !processExists(pid) {
+		os.Remove(pidFile())
+		return
+	}
+	p, _ := os.FindProcess(pid)
+	if err := p.Signal(syscall.SIGTERM); err == nil {
+		fmt.Printf("terminated existing weclaw process (pid=%d)\n", pid)
+	}
+	os.Remove(pidFile())
+}
+
 // runDaemon spawns weclaw start (without --daemon) as a background process.
 func runDaemon() error {
-	// Check if already running
-	if pid, err := readPid(); err == nil {
-		if processExists(pid) {
-			fmt.Printf("weclaw is already running (pid=%d)\n", pid)
-			return nil
-		}
-	}
+	// Kill existing process to ensure only one instance
+	killExistingProcess()
 
 	// Ensure log directory exists
 	if err := os.MkdirAll(weclawDir(), 0o700); err != nil {

@@ -10,6 +10,17 @@ import (
 // Version is set at build time via -ldflags.
 var Version = "dev"
 
+// BuildTime is set at build time via -ldflags to YYYYMMDD.HHMM format.
+var BuildTime = ""
+
+// BuildVersion returns the effective version string for display.
+func BuildVersion() string {
+	if BuildTime != "" {
+		return BuildTime
+	}
+	return Version
+}
+
 var rootCmd = &cobra.Command{
 	Use:     "weclaw",
 	Short:   "WeChat AI agent bridge",

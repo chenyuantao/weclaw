@@ -27,7 +27,11 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the current version",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("weclaw %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
+		ver := Version
+		if BuildTime != "" {
+			ver = fmt.Sprintf("%s (build %s)", Version, BuildTime)
+		}
+		fmt.Printf("weclaw %s (%s/%s)\n", ver, runtime.GOOS, runtime.GOARCH)
 	},
 }
 
