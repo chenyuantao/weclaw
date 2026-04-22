@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -100,7 +101,7 @@ func (a *CLIAgent) ResetSession(_ context.Context, conversationID string) (strin
 
 // Chat sends a message to the CLI agent and returns the response.
 func (a *CLIAgent) Chat(ctx context.Context, conversationID string, message string) (string, error) {
-	switch a.name {
+	switch filepath.Base(a.command) {
 	case "codex":
 		return a.chatCodex(ctx, message)
 	default:
