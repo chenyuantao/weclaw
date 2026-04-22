@@ -23,9 +23,8 @@ weclaw start
 就这么简单。首次启动时，WeClaw 会：
 
 1. 显示二维码 — 用微信扫码登录
-2. 自动检测已安装的 AI Agent（Claude、Codex、Gemini 等）
-3. 保存配置到 `~/.weclaw/config.json`
-4. 开始接收和回复微信消息
+2. 加载 `~/.weclaw/config.json` 中的 Agent 配置
+3. 开始接收和回复微信消息
 
 使用 `weclaw login` 可以添加更多微信账号。
 

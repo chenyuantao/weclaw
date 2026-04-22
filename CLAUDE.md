@@ -43,7 +43,7 @@ WeChat User → iLink API (long-poll) → messaging.Handler → Agent → Respon
   - `ACPAgent` — long-running subprocess, JSON-RPC 2.0 over stdin/stdout, session-based
   - `CLIAgent` — spawns new process per message, parses `stream-json` output
   - `HTTPAgent` — stateless OpenAI-compatible chat completions, in-memory history
-- **`config/`** — Config loading from `~/.weclaw/config.json` + env vars. `detect.go` auto-discovers installed agents via `exec.LookPath`.
+- **`config/`** — Config loading from `~/.weclaw/config.json` + env vars.
 - **`ilink/`** — WeChat iLink API client: auth (QR login), long-poll message monitor, HTTP client for send/receive.
 - **`messaging/`** — Message handler (command routing, agent factory, typing indicators), sender, media upload/download, CDN encryption (AES-128-ECB), markdown-to-plaintext conversion.
 - **`api/`** — HTTP REST server (`:18011`) for proactive messaging.

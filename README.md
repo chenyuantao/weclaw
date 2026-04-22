@@ -22,9 +22,8 @@ weclaw start
 
 That's it. On first start, WeClaw will:
 1. Show a QR code — scan with WeChat to login
-2. Auto-detect installed AI agents (Claude, Codex, Gemini, etc.)
-3. Save config to `~/.weclaw/config.json`
-4. Start receiving and replying to WeChat messages
+2. Load agent config from `~/.weclaw/config.json`
+3. Start receiving and replying to WeChat messages
 
 Use `weclaw login` to add additional WeChat accounts.
 
@@ -51,8 +50,6 @@ docker run -it -v ~/.weclaw:/root/.weclaw ghcr.io/fastclaw-ai/weclaw start
 | ACP  | Long-running subprocess, JSON-RPC over stdio. Fastest — reuses process and sessions. | Claude, Codex, Kimi, Gemini, Cursor, OpenCode, OpenClaw |
 | CLI  | Spawns a new process per message. Supports session resume via `--resume`. | Claude (`claude -p`), Codex (`codex exec`) |
 | HTTP | OpenAI-compatible chat completions API. | OpenClaw (HTTP fallback) |
-
-Auto-detection picks ACP over CLI when both are available.
 
 ## Chat Commands
 

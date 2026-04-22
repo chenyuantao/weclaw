@@ -75,19 +75,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 		accounts = append(accounts, creds)
 	}
 
-	// Load config and auto-detect agents
+	// Load config
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if config.DetectAndConfigure(cfg) {
-		if err := config.Save(cfg); err != nil {
-			log.Printf("Warning: failed to save auto-detected config: %v", err)
-		} else {
-			path, _ := config.ConfigPath()
-			log.Printf("Auto-detected agents saved to %s", path)
-		}
 	}
 
 	// Log all available agents
