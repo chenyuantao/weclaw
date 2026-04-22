@@ -60,26 +60,16 @@ Send these as WeChat messages:
 
 | Command | Description |
 |---------|-------------|
-| `hello` | Send to default agent |
-| `/codex write a function` | Send to a specific agent |
-| `/cc explain this code` | Send to agent by alias |
-| `/claude` | Switch default agent to Claude |
+| `/new [message]` | Create session on default agent |
+| `/claude [message]` | Create session on a configured agent |
+| `@nickname message` | Chat with an existing session |
+| `/admin [message]` | Edit config via agent |
+| `/clear` | Archive all sessions |
+| `/clear @nickname` | Archive a specific session |
 | `/status` | Show current agent info |
 | `/help` | Show help message |
 
-### Aliases
-
-| Alias | Agent |
-|-------|-------|
-| `/cc` | claude |
-| `/cx` | codex |
-| `/cs` | cursor |
-| `/km` | kimi |
-| `/gm` | gemini |
-| `/ocd` | opencode |
-| `/oc` | openclaw |
-
-Switching default agent is persisted to config — survives restarts.
+Agent commands (e.g. `/claude`, `/codex`) are driven by your config — any agent defined in `~/.weclaw/config.json` becomes a command automatically.
 
 ## Media Messages
 

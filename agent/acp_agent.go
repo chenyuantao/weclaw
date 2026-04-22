@@ -141,6 +141,7 @@ func NewACPAgent(cfg ACPAgentConfig) *ACPAgent {
 	if cfg.Command == "" {
 		cfg.Command = "claude-agent-acp"
 	}
+	cfg.Cwd = expandHome(cfg.Cwd)
 	if cfg.Cwd == "" {
 		cfg.Cwd = defaultWorkspace()
 	}
@@ -565,6 +566,7 @@ func (a *ACPAgent) Info() AgentInfo {
 		Type:    "acp",
 		Model:   a.model,
 		Command: a.command,
+		Cwd:     a.cwd,
 	}
 	a.mu.Lock()
 	if a.cmd != nil && a.cmd.Process != nil {

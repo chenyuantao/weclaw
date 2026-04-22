@@ -13,6 +13,7 @@ type AgentInfo struct {
 	Type    string // e.g. "acp", "cli", "http"
 	Model   string // e.g. "sonnet", "gpt-4o-mini"
 	Command string // binary path, e.g. "/usr/local/bin/claude-agent-acp"
+	Cwd     string // working directory
 	PID     int    // subprocess PID (0 if not applicable, e.g. http agent)
 }
 
@@ -23,6 +24,18 @@ func (i AgentInfo) String() string {
 		s += fmt.Sprintf(", pid=%d", i.PID)
 	}
 	return s
+}
+
+// expandHome expands a leading "~/" in path to the user's home directory.
+func expandHome(path string) string {
+	if len(path) < 2 || path[:2] != "~/" {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[2:])
 }
 
 // defaultWorkspace returns ~/.weclaw/workspace as the default working directory.

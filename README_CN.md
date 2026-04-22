@@ -59,28 +59,18 @@ docker run -it -v ~/.weclaw:/root/.weclaw ghcr.io/fastclaw-ai/weclaw start
 
 在微信中发送以下命令：
 
-| 命令                    | 说明                     |
-| ----------------------- | ------------------------ |
-| `你好`                  | 发送给默认 Agent         |
-| `/codex 写一个排序函数` | 发送给指定 Agent         |
-| `/cc 解释一下这段代码`  | 通过别名发送             |
-| `/claude`               | 切换默认 Agent 为 Claude |
-| `/status`               | 查看当前 Agent 信息      |
-| `/help`                 | 查看帮助信息             |
+| 命令                        | 说明                       |
+| --------------------------- | -------------------------- |
+| `/new [消息]`               | 在默认 Agent 上创建会话    |
+| `/claude [消息]`            | 在指定 Agent 上创建会话    |
+| `@nickname 消息`            | 与已有会话对话             |
+| `/admin [消息]`             | 通过 Agent 编辑配置        |
+| `/clear`                    | 归档所有会话               |
+| `/clear @nickname`          | 归档指定会话               |
+| `/status`                   | 查看当前 Agent 信息        |
+| `/help`                     | 查看帮助信息               |
 
-### 快捷别名
-
-| 别名   | Agent    |
-| ------ | -------- |
-| `/cc`  | Claude   |
-| `/cx`  | Codex    |
-| `/cs`  | Cursor   |
-| `/km`  | Kimi     |
-| `/gm`  | Gemini   |
-| `/ocd` | OpenCode |
-| `/oc`  | OpenClaw |
-
-切换默认 Agent 会写入配置文件，重启后仍然生效。
+Agent 命令（如 `/claude`、`/codex`）由配置驱动——在 `~/.weclaw/config.json` 中定义的 Agent 会自动变成可用命令。
 
 ## 富媒体消息
 

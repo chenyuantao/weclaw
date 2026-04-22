@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -15,76 +16,91 @@ import (
 // AgentFactory creates an agent by config name. Returns nil if the name is unknown.
 type AgentFactory func(ctx context.Context, name string) agent.Agent
 
-// SaveDefaultFunc persists the default agent name to config file.
-type SaveDefaultFunc func(name string) error
+// CommandsFunc returns the current command key → agent type mapping from config.
+type CommandsFunc func() map[string]string
 
-// AgentMeta holds static config info about an agent (for /status display).
-type AgentMeta struct {
-	Name    string
-	Type    string // "acp", "cli", "http"
-	Command string // binary path or endpoint
-	Model   string
-}
+// DefaultKeyFunc returns the current default command key from config.
+type DefaultKeyFunc func() string
+
+// ConfigHashFunc returns a fingerprint of the agent config for the given key.
+// Used to detect config changes and recreate agents without restart.
+type ConfigHashFunc func(name string) string
 
 // Handler processes incoming WeChat messages and dispatches replies.
 type Handler struct {
 	mu            sync.RWMutex
-	defaultName   string
 	agents        map[string]agent.Agent // name -> running agent
-	agentMetas    []AgentMeta            // all configured agents (for /status)
+	agentHash     map[string]string      // name -> config fingerprint at creation time
 	factory       AgentFactory
-	saveDefault   SaveDefaultFunc
+	commands      CommandsFunc
+	defaultKey    DefaultKeyFunc
+	configHash    ConfigHashFunc
 	sessions      *SessionManager
 	contextTokens sync.Map // map[userID]contextToken
 }
 
 // NewHandler creates a new message handler.
-func NewHandler(factory AgentFactory, saveDefault SaveDefaultFunc, sessions *SessionManager) *Handler {
+func NewHandler(factory AgentFactory, commands CommandsFunc, defaultKey DefaultKeyFunc, configHash ConfigHashFunc, sessions *SessionManager) *Handler {
 	return &Handler{
-		agents:      make(map[string]agent.Agent),
-		factory:     factory,
-		saveDefault: saveDefault,
-		sessions:    sessions,
+		agents:     make(map[string]agent.Agent),
+		agentHash:  make(map[string]string),
+		factory:    factory,
+		commands:   commands,
+		defaultKey: defaultKey,
+		configHash: configHash,
+		sessions:   sessions,
 	}
 }
 
-// SetAgentMetas sets the list of all configured agents (for /status).
-func (h *Handler) SetAgentMetas(metas []AgentMeta) {
+// PreWarmAgent registers a pre-started agent for the given key.
+func (h *Handler) PreWarmAgent(name string, ag agent.Agent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.agentMetas = metas
-}
-
-// SetDefaultAgent sets the default agent (already started).
-func (h *Handler) SetDefaultAgent(name string, ag agent.Agent) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.defaultName = name
 	h.agents[name] = ag
-	log.Printf("[handler] default agent ready: %s (%s)", name, ag.Info())
+	if h.configHash != nil {
+		h.agentHash[name] = h.configHash(name)
+	}
+	log.Printf("[handler] agent pre-warmed: %s (%s)", name, ag.Info())
 }
 
 // getAgent returns a running agent by name, or starts it on demand via factory.
 func (h *Handler) getAgent(ctx context.Context, name string) (agent.Agent, error) {
-	// Fast path: already running
-	h.mu.RLock()
-	ag, ok := h.agents[name]
-	h.mu.RUnlock()
-	if ok {
-		return ag, nil
-	}
-
-	// Slow path: create on demand
 	if h.factory == nil {
 		return nil, fmt.Errorf("agent %q not found and no factory configured", name)
 	}
 
+	// Check current config fingerprint
+	currentHash := ""
+	if h.configHash != nil {
+		currentHash = h.configHash(name)
+	}
+
+	// Fast path: cached and config unchanged
+	h.mu.RLock()
+	ag, cached := h.agents[name]
+	storedHash := h.agentHash[name]
+	h.mu.RUnlock()
+
+	if cached && currentHash == storedHash {
+		return ag, nil
+	}
+
+	// Slow path: create or recreate
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	// Double-check after acquiring write lock
 	if ag, ok := h.agents[name]; ok {
-		return ag, nil
+		if currentHash == h.agentHash[name] {
+			return ag, nil
+		}
+		// Config changed — stop old agent and recreate
+		log.Printf("[handler] config changed for %q, recreating agent", name)
+		if stopper, ok := ag.(interface{ Stop() }); ok {
+			stopper.Stop()
+		}
+		delete(h.agents, name)
+		delete(h.agentHash, name)
 	}
 
 	log.Printf("[handler] starting agent %q on demand...", name)
@@ -94,38 +110,12 @@ func (h *Handler) getAgent(ctx context.Context, name string) (agent.Agent, error
 	}
 
 	h.agents[name] = ag
+	h.agentHash[name] = currentHash
 	log.Printf("[handler] agent started on demand: %s (%s)", name, ag.Info())
 	return ag, nil
 }
 
-// getDefaultName returns the current default agent name.
-func (h *Handler) getDefaultName() string {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.defaultName
-}
-
-// agentAliases maps short aliases to agent config names.
-var agentAliases = map[string]string{
-	"cc":  "claude",
-	"cx":  "codex",
-	"oc":  "openclaw",
-	"cs":  "cursor",
-	"km":  "kimi",
-	"gm":  "gemini",
-	"ocd": "opencode",
-}
-
-// resolveAlias returns the full agent name for an alias, or the original name if no alias matches.
-func resolveAlias(name string) string {
-	if full, ok := agentAliases[name]; ok {
-		return full
-	}
-	return name
-}
-
 // parseCommand checks if text starts with "/command " and returns (command, rest).
-// Aliases are resolved for known agent names.
 // If no command prefix, returns ("", originalText).
 func parseCommand(text string) (string, string) {
 	if !strings.HasPrefix(text, "/") {
@@ -135,11 +125,10 @@ func parseCommand(text string) (string, string) {
 	rest := text[1:] // strip leading "/"
 	idx := strings.IndexByte(rest, ' ')
 	if idx <= 0 {
-		return resolveAlias(rest), ""
+		return rest, ""
 	}
 
-	name := resolveAlias(rest[:idx])
-	return name, strings.TrimSpace(rest[idx+1:])
+	return rest[:idx], strings.TrimSpace(rest[idx+1:])
 }
 
 // parseAtNickname checks if text starts with "@nickname " and returns (nickname, message).
@@ -195,7 +184,7 @@ func (h *Handler) HandleMessage(ctx context.Context, client *ilink.Client, msg i
 
 	// /help
 	if trimmed == "/help" {
-		reply := buildHelpText()
+		reply := h.buildHelpText()
 		h.sendReply(ctx, client, userID, reply, msg.ContextToken, clientID)
 		return
 	}
@@ -223,24 +212,39 @@ func (h *Handler) HandleMessage(ctx context.Context, client *ilink.Client, msg i
 		return
 	}
 
-	// /new [message] — create session on default agent
-	if trimmed == "/new" || strings.HasPrefix(trimmed, "/new ") {
-		message := strings.TrimSpace(strings.TrimPrefix(trimmed, "/new"))
-		defaultName := h.getDefaultName()
-		if defaultName == "" {
+	// /admin [message] — create session on default agent with cwd=~/.weclaw/ for config editing
+	if trimmed == "/admin" || strings.HasPrefix(trimmed, "/admin ") {
+		message := strings.TrimSpace(strings.TrimPrefix(trimmed, "/admin"))
+		defaultKey := h.defaultKey()
+		if defaultKey == "" {
 			h.sendReply(ctx, client, userID, "No default agent configured.", msg.ContextToken, clientID)
 			return
 		}
-		h.handleNewSession(ctx, client, userID, defaultName, message, msg.ContextToken, clientID)
+		h.handleNewSessionAs(ctx, client, userID, "admin:"+defaultKey, "admin", message, msg.ContextToken, clientID)
 		return
 	}
 
-	// /cc [message], /cx [message], etc. — create session on specific agent
+	// /new [message] — create session on default agent
+	if trimmed == "/new" || strings.HasPrefix(trimmed, "/new ") {
+		message := strings.TrimSpace(strings.TrimPrefix(trimmed, "/new"))
+		defaultKey := h.defaultKey()
+		if defaultKey == "" {
+			h.sendReply(ctx, client, userID, "No default agent configured.", msg.ContextToken, clientID)
+			return
+		}
+		h.handleNewSession(ctx, client, userID, defaultKey, message, msg.ContextToken, clientID)
+		return
+	}
+
+	// /key [message] — create session on a config-driven agent command
 	if strings.HasPrefix(trimmed, "/") {
 		cmdName, message := parseCommand(trimmed)
 		if cmdName != "" {
-			h.handleNewSession(ctx, client, userID, cmdName, message, msg.ContextToken, clientID)
-			return
+			cmds := h.commands()
+			if _, ok := cmds[cmdName]; ok {
+				h.handleNewSession(ctx, client, userID, cmdName, message, msg.ContextToken, clientID)
+				return
+			}
 		}
 	}
 
@@ -250,46 +254,48 @@ func (h *Handler) HandleMessage(ctx context.Context, client *ilink.Client, msg i
 }
 
 // handleNewSession creates a new session and optionally chats.
-func (h *Handler) handleNewSession(ctx context.Context, client *ilink.Client, userID, agentName, message, contextToken, clientID string) {
-	ag, err := h.getAgent(ctx, agentName)
+func (h *Handler) handleNewSession(ctx context.Context, client *ilink.Client, userID, keyName, message, contextToken, clientID string) {
+	h.handleNewSessionAs(ctx, client, userID, keyName, keyName, message, contextToken, clientID)
+}
+
+// handleNewSessionAs creates a new session using agentKey for agent lookup and displayName for session naming.
+func (h *Handler) handleNewSessionAs(ctx context.Context, client *ilink.Client, userID, agentKey, displayName, message, contextToken, clientID string) {
+	ag, err := h.getAgent(ctx, agentKey)
 	if err != nil {
-		h.sendReply(ctx, client, userID, fmt.Sprintf("Agent %q is not available: %v", agentName, err), contextToken, clientID)
+		h.sendReply(ctx, client, userID, fmt.Sprintf("Agent %q is not available: %v", agentKey, err), contextToken, clientID)
 		return
 	}
 
-	sess := h.sessions.Create(userID, agentName)
+	sess := h.sessions.CreateWithKey(userID, displayName, agentKey)
 
 	if message == "" {
-		reply := fmt.Sprintf("New %s session created: @%s\nUse @%s <message> to chat.", agentName, sess.Nickname, sess.Nickname)
+		reply := fmt.Sprintf("New %s session created: @%s\nUse @%s <message> to chat.", displayName, sess.Nickname, sess.Nickname)
 		h.sendReply(ctx, client, userID, reply, contextToken, clientID)
 		return
 	}
 
-	// Chat immediately
-	go func() {
-		if typingErr := SendTypingState(ctx, client, userID, contextToken); typingErr != nil {
-			log.Printf("[handler] failed to send typing state: %v", typingErr)
-		}
-	}()
-
-	reply, chatErr := h.chatWithSession(ctx, ag, sess, message)
-	if chatErr != nil {
-		reply = fmt.Sprintf("Error: %v", chatErr)
-	} else {
-		reply = fmt.Sprintf("[%s]\n%s", NicknameDisplay(sess.Nickname), reply)
-	}
-
-	h.sendAndExtractImages(ctx, client, userID, reply, contextToken, clientID)
+	// Send immediate ack with agent info
+	info := ag.Info()
+	ack := fmt.Sprintf("[%s]\nNew session created (model: %s, cwd: %s)", NicknameDisplay(sess.Nickname), info.Model, info.Cwd)
+	h.dispatchChat(ctx, client, userID, ag, sess, ack, message, contextToken, clientID)
 }
 
 // handleSessionChat routes a message to an existing session.
 func (h *Handler) handleSessionChat(ctx context.Context, client *ilink.Client, userID string, sess *Session, message, contextToken, clientID string) {
-	ag, err := h.getAgent(ctx, sess.AgentName)
+	ag, err := h.getAgent(ctx, sess.AgentLookupKey())
 	if err != nil {
-		h.sendReply(ctx, client, userID, fmt.Sprintf("Agent %q for session @%s is not available: %v", sess.AgentName, sess.Nickname, err), contextToken, clientID)
+		h.sendReply(ctx, client, userID, fmt.Sprintf("Agent %q for session @%s is not available: %v", sess.AgentLookupKey(), sess.Nickname, err), contextToken, clientID)
 		return
 	}
 
+	ack := fmt.Sprintf("[%s]\nReceived, thinking...", NicknameDisplay(sess.Nickname))
+	h.dispatchChat(ctx, client, userID, ag, sess, ack, message, contextToken, clientID)
+}
+
+// dispatchChat sends an ack, typing indicator, chats with the agent, and sends the reply.
+func (h *Handler) dispatchChat(ctx context.Context, client *ilink.Client, userID string, ag agent.Agent, sess *Session, ack, message, contextToken, clientID string) {
+	// Send ack and typing indicator concurrently (don't block the chat)
+	go h.sendReply(ctx, client, userID, ack, contextToken, clientID)
 	go func() {
 		if typingErr := SendTypingState(ctx, client, userID, contextToken); typingErr != nil {
 			log.Printf("[handler] failed to send typing state: %v", typingErr)
@@ -303,7 +309,7 @@ func (h *Handler) handleSessionChat(ctx context.Context, client *ilink.Client, u
 		reply = fmt.Sprintf("[%s]\n%s", NicknameDisplay(sess.Nickname), reply)
 	}
 
-	h.sendAndExtractImages(ctx, client, userID, reply, contextToken, clientID)
+	h.sendAndExtractImages(ctx, client, userID, reply, contextToken, NewClientID())
 }
 
 // handleClear archives sessions based on the /clear command.
@@ -376,20 +382,34 @@ func (h *Handler) sendAndExtractImages(ctx context.Context, client *ilink.Client
 
 // buildStatus returns a short status string showing the current default agent.
 func (h *Handler) buildStatus() string {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	var sb strings.Builder
 
-	if h.defaultName == "" {
-		return "agent: none (echo mode)"
+	defaultKey := h.defaultKey()
+	sb.WriteString(fmt.Sprintf("default: /%s", defaultKey))
+	if defaultKey == "" {
+		sb.WriteString(" (none)")
 	}
 
-	ag, ok := h.agents[h.defaultName]
-	if !ok {
-		return fmt.Sprintf("agent: %s (not started)", h.defaultName)
+	cmds := h.commands()
+	if len(cmds) > 0 {
+		keys := make([]string, 0, len(cmds))
+		for k := range cmds {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		sb.WriteString("\n\nagents:")
+		for _, key := range keys {
+			marker := ""
+			if key == defaultKey {
+				marker = " *"
+			}
+			sb.WriteString(fmt.Sprintf("\n  /%s (%s)%s", key, cmds[key], marker))
+		}
+	} else {
+		sb.WriteString("\n\nNo agents configured.")
 	}
 
-	info := ag.Info()
-	return fmt.Sprintf("agent: %s\ntype: %s\nmodel: %s", h.defaultName, info.Type, info.Model)
+	return sb.String()
 }
 
 // buildSessionHelp returns help text with active session list.
@@ -400,7 +420,7 @@ func (h *Handler) buildSessionHelp(userID, prefix string) string {
 		sb.WriteString("\n\n")
 	}
 
-	sb.WriteString(buildHelpText())
+	sb.WriteString(h.buildHelpText())
 
 	sessions := h.sessions.List(userID)
 	if len(sessions) > 0 {
@@ -413,20 +433,33 @@ func (h *Handler) buildSessionHelp(userID, prefix string) string {
 	return sb.String()
 }
 
-func buildHelpText() string {
-	return `Commands:
-@nickname message - Chat with a session
-/new [message] - Create session on default agent
-/cc [message] - Create session on claude
-/cx [message] - Create session on codex
-/cs [message] - Create session on cursor
-/km [message] - Create session on kimi
-/gm [message] - Create session on gemini
-/oc [message] - Create session on openclaw
-/clear - Archive all sessions
-/clear @nickname - Archive a specific session
-/status - Show agent info
-/help - Show this help`
+func (h *Handler) buildHelpText() string {
+	var sb strings.Builder
+	sb.WriteString("Commands:\n")
+	sb.WriteString("@nickname message - Chat with a session\n")
+	sb.WriteString("/new [message] - Create session on default agent\n")
+
+	// Dynamic agent commands from config
+	cmds := h.commands()
+	if len(cmds) > 0 {
+		// Sort keys for stable output
+		keys := make([]string, 0, len(cmds))
+		for k := range cmds {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			agentType := cmds[key]
+			sb.WriteString(fmt.Sprintf("/%s [message] - Create session (%s)\n", key, agentType))
+		}
+	}
+
+	sb.WriteString("/admin [message] - Edit config via agent\n")
+	sb.WriteString("/clear - Archive all sessions\n")
+	sb.WriteString("/clear @nickname - Archive a specific session\n")
+	sb.WriteString("/status - Show agent info\n")
+	sb.WriteString("/help - Show this help")
+	return sb.String()
 }
 
 func extractText(msg ilink.WeixinMessage) string {

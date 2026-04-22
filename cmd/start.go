@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -105,33 +107,60 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 	go sessions.StartCleanup(ctx)
 
-	// Create handler with an agent factory for on-demand agent creation
+	// Create handler with config-reloading callbacks
 	handler := messaging.NewHandler(
 		func(ctx context.Context, name string) agent.Agent {
-			return createAgentByName(ctx, cfg, name)
+			// Reload config on each factory call for dynamic behavior
+			freshCfg, err := config.Load()
+			if err != nil {
+				log.Printf("[handler] failed to reload config: %v, using cached config", err)
+				freshCfg = cfg
+			}
+			// admin:KEY — clone the agent config with cwd=~/.weclaw/
+			if strings.HasPrefix(name, "admin:") {
+				realKey := strings.TrimPrefix(name, "admin:")
+				return createAdminAgent(ctx, freshCfg, realKey)
+			}
+			return createAgentByName(ctx, freshCfg, name)
 		},
-		func(name string) error {
-			cfg.DefaultAgent = name
-			return config.Save(cfg)
+		func() map[string]string {
+			freshCfg, err := config.Load()
+			if err != nil {
+				log.Printf("[handler] failed to reload config for commands: %v", err)
+				freshCfg = cfg
+			}
+			cmds := make(map[string]string, len(freshCfg.Agents))
+			for key, agCfg := range freshCfg.Agents {
+				agentType := agCfg.Agent
+				if agentType == "" {
+					agentType = agCfg.Type
+				}
+				cmds[key] = agentType
+			}
+			return cmds
+		},
+		func() string {
+			freshCfg, err := config.Load()
+			if err != nil {
+				log.Printf("[handler] failed to reload config for default key: %v", err)
+				return cfg.DefaultAgent
+			}
+			return freshCfg.DefaultAgent
+		},
+		func(name string) string {
+			freshCfg, err := config.Load()
+			if err != nil {
+				return ""
+			}
+			agCfg, ok := freshCfg.Agents[name]
+			if !ok {
+				return ""
+			}
+			data, _ := json.Marshal(agCfg)
+			return string(data)
 		},
 		sessions,
 	)
-
-	// Populate agent metas for /status
-	var metas []messaging.AgentMeta
-	for name, agCfg := range cfg.Agents {
-		command := agCfg.Command
-		if agCfg.Type == "http" {
-			command = agCfg.Endpoint
-		}
-		metas = append(metas, messaging.AgentMeta{
-			Name:    name,
-			Type:    agCfg.Type,
-			Command: command,
-			Model:   agCfg.Model,
-		})
-	}
-	handler.SetAgentMetas(metas)
 
 	// Start default agent initialization in background so monitors can start immediately
 	go func() {
@@ -144,7 +173,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if ag == nil {
 			log.Printf("Failed to initialize default agent %q, staying in echo mode", cfg.DefaultAgent)
 		} else {
-			handler.SetDefaultAgent(cfg.DefaultAgent, ag)
+			handler.PreWarmAgent(cfg.DefaultAgent, ag)
 		}
 	}()
 
@@ -271,6 +300,18 @@ func createAgentByName(ctx context.Context, cfg *config.Config, name string) age
 		log.Printf("[agent] unknown type %q for %q", agCfg.Type, name)
 		return nil
 	}
+}
+
+// createAdminAgent creates an agent using the given config key but with cwd overridden to ~/.weclaw/.
+func createAdminAgent(ctx context.Context, cfg *config.Config, name string) agent.Agent {
+	agCfg, ok := cfg.Agents[name]
+	if !ok {
+		log.Printf("[agent] admin: %q not found in config", name)
+		return nil
+	}
+	agCfg.Cwd = weclawDir()
+	cfg = &config.Config{Agents: map[string]config.AgentConfig{name: agCfg}}
+	return createAgentByName(ctx, cfg, name)
 }
 
 // doLogin runs the interactive QR login flow and returns credentials.

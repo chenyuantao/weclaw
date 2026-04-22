@@ -35,7 +35,7 @@ type CLIAgentConfig struct {
 
 // NewCLIAgent creates a new CLI agent.
 func NewCLIAgent(cfg CLIAgentConfig) *CLIAgent {
-	cwd := cfg.Cwd
+	cwd := expandHome(cfg.Cwd)
 	if cwd == "" {
 		cwd = defaultWorkspace()
 	}
@@ -72,6 +72,7 @@ func (a *CLIAgent) Info() AgentInfo {
 		Type:    "cli",
 		Model:   a.model,
 		Command: a.command,
+		Cwd:     a.cwd,
 	}
 }
 

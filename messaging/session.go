@@ -19,10 +19,19 @@ type Session struct {
 	ID           string    `json:"id"`
 	Nickname     string    `json:"nickname"`
 	AgentName    string    `json:"agent_name"`
+	AgentKey     string    `json:"agent_key,omitempty"` // actual key for agent lookup (defaults to AgentName if empty)
 	ConvKey      string    `json:"conv_key"`
 	AgentSession string    `json:"agent_session"`
 	CreatedAt    time.Time `json:"created_at"`
 	LastActiveAt time.Time `json:"last_active_at"`
+}
+
+// AgentLookupKey returns the key to use for agent lookup, falling back to AgentName.
+func (s *Session) AgentLookupKey() string {
+	if s.AgentKey != "" {
+		return s.AgentKey
+	}
+	return s.AgentName
 }
 
 // nicknamePool is a set of short, memorable nicknames for sessions.
@@ -93,14 +102,20 @@ func NewSessionManager(dataDir string) *SessionManager {
 
 // Create creates a new session for the given user and agent.
 func (sm *SessionManager) Create(userID, agentName string) *Session {
+	return sm.CreateWithKey(userID, agentName, "")
+}
+
+// CreateWithKey creates a new session with a separate agent lookup key.
+func (sm *SessionManager) CreateWithKey(userID, agentName, agentKey string) *Session {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	nickname := sm.pickNickname(userID)
+	nickname := agentName + "-" + sm.pickNickname(userID, agentName)
 	sess := &Session{
 		ID:           uuid.New().String(),
 		Nickname:     nickname,
 		AgentName:    agentName,
+		AgentKey:     agentKey,
 		ConvKey:      userID + ":" + uuid.New().String(),
 		CreatedAt:    time.Now(),
 		LastActiveAt: time.Now(),
@@ -260,15 +275,16 @@ func (sm *SessionManager) saveLocked() {
 	}
 }
 
-// pickNickname selects an unused nickname for the given user. Must be called with sm.mu held.
-func (sm *SessionManager) pickNickname(userID string) string {
+// pickNickname selects an unused nickname for the given user and agent prefix. Must be called with sm.mu held.
+func (sm *SessionManager) pickNickname(userID, agentName string) string {
 	used := make(map[string]bool)
 	for _, s := range sm.sessions[userID] {
 		used[s.Nickname] = true
 	}
 
 	for _, name := range nicknamePool {
-		if !used[name] {
+		full := agentName + "-" + name
+		if !used[full] {
 			return name
 		}
 	}
@@ -276,7 +292,8 @@ func (sm *SessionManager) pickNickname(userID string) string {
 	// Fallback: s1, s2, ...
 	for i := 1; ; i++ {
 		name := fmt.Sprintf("s%d", i)
-		if !used[name] {
+		full := agentName + "-" + name
+		if !used[full] {
 			return name
 		}
 	}

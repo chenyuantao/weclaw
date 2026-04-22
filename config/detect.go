@@ -63,6 +63,7 @@ func DetectAndConfigure(cfg *Config) bool {
 		log.Printf("[config] auto-detected %s at %s (type=%s)", candidate.Name, path, candidate.Type)
 		cfg.Agents[candidate.Name] = AgentConfig{
 			Type:    candidate.Type,
+			Agent:   candidate.Name,
 			Command: path,
 			Args:    candidate.Args,
 			Model:   candidate.Model,
